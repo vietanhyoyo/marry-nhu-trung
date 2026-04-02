@@ -309,6 +309,66 @@
         animation: fadeUp 1.2s ease 0.85s both;
       }
 
+      .lyrics-shell {
+        position: relative;
+        max-width: 620px;
+        margin: 26px auto 0;
+        padding: 18px 18px 20px;
+        border: 1px solid rgba(255, 230, 233, 0.14);
+        border-radius: 26px;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+        animation: fadeUp 1.2s ease 0.95s both;
+      }
+
+      .lyrics-title {
+        margin: 0 0 12px;
+        font-size: 0.8rem;
+        letter-spacing: 0.28em;
+        text-transform: uppercase;
+        color: rgba(255, 238, 224, 0.82);
+      }
+
+      .lyrics-viewport {
+        position: relative;
+        height: 190px;
+        overflow: hidden;
+        mask-image: linear-gradient(to bottom, transparent 0%, black 18%, black 82%, transparent 100%);
+        -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 18%, black 82%, transparent 100%);
+      }
+
+      .lyrics-track {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 0;
+        transition: transform 420ms ease;
+      }
+
+      .lyric-line {
+        min-height: 40px;
+        padding: 6px 0;
+        font-size: clamp(0.98rem, 2.2vw, 1.08rem);
+        line-height: 1.55;
+        color: rgba(255, 235, 238, 0.52);
+        transition:
+          transform 320ms ease,
+          opacity 320ms ease,
+          color 320ms ease,
+          text-shadow 320ms ease;
+      }
+
+      .lyric-line.active {
+        color: #fff7d0;
+        opacity: 1;
+        transform: scale(1.05);
+        text-shadow: 0 0 18px rgba(255, 228, 157, 0.28);
+      }
+
+      .lyric-line.past {
+        color: rgba(255, 226, 232, 0.72);
+      }
+
       .spark {
         position: absolute;
         width: 10px;
@@ -481,11 +541,18 @@
         <p class="names">Như <span style="opacity: 0.85;">&amp;</span> Trung</p>
         <p class="blessing">Trăm Năm Hạnh Phúc • Bách Niên Giai Lão</p>
         <p class="music-hint" id="musicHint">Đang cố gắng tự phát bài hát khi bạn vừa mở trang...</p>
+
+        <div class="lyrics-shell" aria-live="polite">
+          <div class="lyrics-viewport">
+            <div class="lyrics-track" id="lyricsTrack"></div>
+          </div>
+        </div>
       </section>
     </main>
 
     <audio id="weddingSong" autoplay loop playsinline preload="auto">
       <source src="./Vườn Ngọc Ánh.mp3" type="audio/mpeg" />
+      <track id="lyricsFile" kind="metadata" srclang="vi" label="Lyric" src="./lyrics.vtt" default />
     </audio>
 
     <script>
@@ -510,6 +577,53 @@
       const audio = document.getElementById("weddingSong");
       const playButton = document.getElementById("playButton");
       const musicHint = document.getElementById("musicHint");
+      const lyricsTrack = document.getElementById("lyricsTrack");
+      const lyricTrackElement = document.getElementById("lyricsFile");
+      let lyrics = [];
+      let lyricElements = [];
+      let activeLyricIndex = 0;
+
+      function normalizeCueText(text) {
+        return text.replace(/\n+/g, " ").trim();
+      }
+
+      function renderLyrics() {
+        if (!lyrics.length) {
+          lyricsTrack.innerHTML = '<p class="lyric-line active">Lyric đang được tải...</p>';
+          lyricElements = Array.from(document.querySelectorAll(".lyric-line"));
+          return;
+        }
+
+        lyricsTrack.innerHTML = lyrics
+          .map(
+            (line, index) =>
+              `<p class="lyric-line${index === 0 ? " active" : ""}" data-index="${index}">${line.text}</p>`
+          )
+          .join("");
+        lyricElements = Array.from(document.querySelectorAll(".lyric-line"));
+      }
+
+      function loadLyricsFromTrack() {
+        const textTrack = Array.from(audio.textTracks || []).find((track) => track.label === "Lyric");
+        if (!textTrack) {
+          return false;
+        }
+
+        textTrack.mode = "hidden";
+
+        if (!textTrack.cues || !textTrack.cues.length) {
+          return false;
+        }
+
+        lyrics = Array.from(textTrack.cues).map((cue) => ({
+          time: cue.startTime,
+          text: normalizeCueText(cue.text)
+        }));
+
+        renderLyrics();
+        updateLyrics();
+        return true;
+      }
 
       function syncButton() {
         const isPlaying = !audio.paused;
@@ -517,6 +631,40 @@
         musicHint.textContent = isPlaying
           ? "Bài hát đang phát. Bạn có thể nhấn nút giữa trái tim để tạm dừng hoặc phát lại."
           : "Nếu trình duyệt chặn tự phát, hãy nhấn nút giữa trái tim để bật bài hát.";
+      }
+
+      function updateLyrics() {
+        if (!lyrics.length || !lyricElements.length) {
+          return;
+        }
+
+        const currentTime = audio.currentTime;
+        let nextIndex = 0;
+
+        for (let i = lyrics.length - 1; i >= 0; i -= 1) {
+          if (currentTime >= lyrics[i].time) {
+            nextIndex = i;
+            break;
+          }
+        }
+
+        if (currentTime < lyrics[0].time) {
+          nextIndex = 0;
+        }
+
+        if (nextIndex === activeLyricIndex && currentTime !== 0) {
+          return;
+        }
+
+        activeLyricIndex = nextIndex;
+        lyricElements.forEach((element, index) => {
+          element.classList.toggle("active", index === activeLyricIndex);
+          element.classList.toggle("past", index < activeLyricIndex);
+        });
+
+        const activeElement = lyricElements[activeLyricIndex];
+        const offset = Math.max(0, activeElement.offsetTop - 72);
+        lyricsTrack.style.transform = `translateY(-${offset}px)`;
       }
 
       async function tryAutoplay() {
@@ -556,8 +704,20 @@
 
       audio.addEventListener("play", syncButton);
       audio.addEventListener("pause", syncButton);
+      audio.addEventListener("timeupdate", updateLyrics);
+      audio.addEventListener("seeked", updateLyrics);
+      audio.addEventListener("loadedmetadata", updateLyrics);
+      audio.addEventListener("loadeddata", loadLyricsFromTrack);
+      lyricTrackElement.addEventListener("load", loadLyricsFromTrack);
+      audio.addEventListener("ended", () => {
+        activeLyricIndex = 0;
+        updateLyrics();
+      });
       window.addEventListener("load", tryAutoplay);
+      renderLyrics();
+      loadLyricsFromTrack();
       syncButton();
+      updateLyrics();
     </script>
   </body>
 </html>
